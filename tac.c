@@ -646,3 +646,493 @@ void out_tac(FILE *f, TAC *i)
 		break;
 	}
 }
+
+/* ============ CFG Implementation ============ */
+
+static int next_bb_id = 0;
+
+/* Create a new basic block */
+static BB *new_bb(void) {
+    BB *bb = (BB *)malloc(sizeof(BB));
+    bb->id = next_bb_id++;
+    bb->first = NULL;
+    bb->last = NULL;
+    bb->labels = NULL;
+    bb->nlabels = 0;
+    bb->succ = NULL;
+    bb->pred = NULL;
+    bb->next = NULL;
+    return bb;
+}
+
+/* Add edge from 'from' to 'to' */
+static void add_edge(BB *from, BB *to) {
+    if (from == NULL || to == NULL) return;
+    
+    /* Add to successor list */
+    ELIST *e = (ELIST *)malloc(sizeof(ELIST));
+    e->block = to;
+    e->next = from->succ;
+    from->succ = e;
+    
+    /* Add to predecessor list */
+    e = (ELIST *)malloc(sizeof(ELIST));
+    e->block = from;
+    e->next = to->pred;
+    to->pred = e;
+}
+
+/* Check if instruction is a block terminator */
+static int is_terminator(int op) {
+    return (op == TAC_GOTO || op == TAC_IFZ || 
+            op == TAC_RETURN || op == TAC_ENDFUNC);
+}
+
+/* Check if instruction starts a new block */
+static int is_leader(TAC *t, TAC *prev) {
+    if (t == NULL) return 0;
+    
+    /* First instruction after BEGINFUNC */
+    if (prev == NULL || prev->op == TAC_BEGINFUNC) 
+        return 1;
+    
+    /* Label instruction */
+    if (t->op == TAC_LABEL) 
+        return 1;
+    
+    /* Instruction after terminator */
+    if (is_terminator(prev->op))
+        return 1;
+    
+    return 0;
+}
+
+/* Find the block containing a label */
+static BB *find_label_block(SYM *label) {
+    if (label == NULL || label->type != SYM_LABEL) {
+        error("Invalid label in jump");
+        return NULL;
+    }
+    
+    BB *bb = (BB *)label->etc;
+    if (bb == NULL) {
+        error("Undefined label: %s", label->name);
+    }
+    return bb;
+}
+
+/* Add label to block */
+static void add_label_to_block(BB *bb, SYM *label) {
+    bb->nlabels++;
+    bb->labels = (SYM **)realloc(bb->labels, bb->nlabels * sizeof(SYM *));
+    bb->labels[bb->nlabels - 1] = label;
+}
+
+/* Build CFG for one function */
+CFG *build_cfg_for_func(TAC *begin_tac, TAC *end_tac) {
+    if (begin_tac == NULL || end_tac == NULL) return NULL;
+    if (begin_tac->op != TAC_BEGINFUNC || end_tac->op != TAC_ENDFUNC) {
+        error("Invalid function boundaries");
+        return NULL;
+    }
+    
+    CFG *cfg = (CFG *)malloc(sizeof(CFG));
+    cfg->func_name = "unknown";
+    cfg->entry = NULL;
+    cfg->list = NULL;
+    cfg->nblocks = 0;
+    
+    /* Get function name from label before BEGINFUNC */
+    if (begin_tac->prev && begin_tac->prev->op == TAC_LABEL) {
+        cfg->func_name = begin_tac->prev->a->name;
+    }
+    
+    BB *current_bb = NULL;
+    BB *last_bb = NULL;
+    TAC *t = begin_tac->next;  /* Skip BEGINFUNC */
+    
+    /* Phase 1: Create blocks and register labels */
+    while (t != NULL && t != end_tac) {
+        if (is_leader(t, t->prev)) {
+            /* Start new block */
+            current_bb = new_bb();
+            current_bb->first = t;
+            
+            /* Link to block list */
+            if (cfg->list == NULL) {
+                cfg->list = current_bb;
+                cfg->entry = current_bb;
+            } else {
+                last_bb->next = current_bb;
+            }
+            last_bb = current_bb;
+            cfg->nblocks++;
+        }
+        
+        /* Register label -> block mapping */
+        if (t->op == TAC_LABEL) {
+            if (current_bb == NULL) {
+                current_bb = new_bb();
+                current_bb->first = t;
+                if (cfg->list == NULL) {
+                    cfg->list = current_bb;
+                    cfg->entry = current_bb;
+                } else {
+                    last_bb->next = current_bb;
+                }
+                last_bb = current_bb;
+                cfg->nblocks++;
+            }
+            
+            add_label_to_block(current_bb, t->a);
+            t->a->etc = (void *)current_bb;  /* Store BB pointer in label */
+        }
+        
+        /* Set last instruction of current block */
+        if (current_bb) {
+            current_bb->last = t;
+        }
+        
+        t = t->next;
+    }
+    
+    /* Phase 2: Build edges */
+    for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+        if (bb->last == NULL) continue;
+        
+        int op = bb->last->op;
+        
+        if (op == TAC_GOTO) {
+            /* Unconditional jump: single successor */
+            BB *target = find_label_block(bb->last->a);
+            if (target) add_edge(bb, target);
+            
+        } else if (op == TAC_IFZ) {
+            /* Conditional jump: two successors */
+            BB *target = find_label_block(bb->last->a);
+            if (target) add_edge(bb, target);
+            
+            /* Fall-through edge */
+            if (bb->next) {
+                add_edge(bb, bb->next);
+            }
+            
+        } else if (op == TAC_RETURN || op == TAC_ENDFUNC) {
+            /* No successors */
+            
+        } else {
+            /* Fall-through to next block */
+            if (bb->next) {
+                add_edge(bb, bb->next);
+            }
+        }
+    }
+    
+    return cfg;
+}
+
+/* Get TAC opcode name for printing */
+static const char *get_op_name(int op) {
+    switch(op) {
+        case TAC_ADD: return "ADD";
+        case TAC_SUB: return "SUB";
+        case TAC_MUL: return "MUL";
+        case TAC_DIV: return "DIV";
+        case TAC_COPY: return "COPY";
+        case TAC_GOTO: return "GOTO";
+        case TAC_IFZ: return "IFZ";
+        case TAC_LABEL: return "LABEL";
+        case TAC_CALL: return "CALL";
+        case TAC_RETURN: return "RETURN";
+        case TAC_VAR: return "VAR";
+        case TAC_FORMAL: return "FORMAL";
+        case TAC_ACTUAL: return "ACTUAL";
+        case TAC_INPUT: return "INPUT";
+        case TAC_OUTPUT: return "OUTPUT";
+        default: return "?";
+    }
+}
+
+/* Format TAC instruction as string (similar to out_tac but returns string) */
+static void format_tac_string(TAC *i, char *buf, size_t bufsize) {
+    char sa[12], sb[12], sc[12];
+    
+    switch(i->op) {
+        case TAC_UNDEF:
+            snprintf(buf, bufsize, "undef");
+            break;
+
+        case TAC_ADD:
+            snprintf(buf, bufsize, "%s = %s + %s", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_SUB:
+            snprintf(buf, bufsize, "%s = %s - %s", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_MUL:
+            snprintf(buf, bufsize, "%s = %s * %s", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_DIV:
+            snprintf(buf, bufsize, "%s = %s / %s", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_EQ:
+            snprintf(buf, bufsize, "%s = (%s == %s)", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_NE:
+            snprintf(buf, bufsize, "%s = (%s != %s)", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_LT:
+            snprintf(buf, bufsize, "%s = (%s < %s)", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_LE:
+            snprintf(buf, bufsize, "%s = (%s <= %s)", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_GT:
+            snprintf(buf, bufsize, "%s = (%s > %s)", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_GE:
+            snprintf(buf, bufsize, "%s = (%s >= %s)", 
+                    to_str(i->a, sa), to_str(i->b, sb), to_str(i->c, sc));
+            break;
+
+        case TAC_NEG:
+            snprintf(buf, bufsize, "%s = - %s", 
+                    to_str(i->a, sa), to_str(i->b, sb));
+            break;
+
+        case TAC_COPY:
+            snprintf(buf, bufsize, "%s = %s", 
+                    to_str(i->a, sa), to_str(i->b, sb));
+            break;
+
+        case TAC_GOTO:
+            snprintf(buf, bufsize, "goto %s", i->a->name);
+            break;
+
+        case TAC_IFZ:
+            snprintf(buf, bufsize, "ifz %s goto %s", 
+                    to_str(i->b, sb), i->a->name);
+            break;
+
+        case TAC_ACTUAL:
+            snprintf(buf, bufsize, "actual %s", to_str(i->a, sa));
+            break;
+
+        case TAC_FORMAL:
+            snprintf(buf, bufsize, "formal %s", to_str(i->a, sa));
+            break;
+
+        case TAC_CALL:
+            if(i->a == NULL) 
+                snprintf(buf, bufsize, "call %s", (char *)i->b);
+            else 
+                snprintf(buf, bufsize, "%s = call %s", 
+                        to_str(i->a, sa), (char *)i->b);
+            break;
+
+        case TAC_INPUT:
+            snprintf(buf, bufsize, "input %s", to_str(i->a, sa));
+            break;
+
+        case TAC_OUTPUT:
+            snprintf(buf, bufsize, "output %s", to_str(i->a, sa));
+            break;
+
+        case TAC_RETURN:
+            snprintf(buf, bufsize, "return %s", to_str(i->a, sa));
+            break;
+
+        case TAC_LABEL:
+            snprintf(buf, bufsize, "%s:", i->a->name);
+            break;
+
+        case TAC_VAR:
+            snprintf(buf, bufsize, "var %s", to_str(i->a, sa));
+            break;
+
+        case TAC_BEGINFUNC:
+            snprintf(buf, bufsize, "begin");
+            break;
+
+        case TAC_ENDFUNC:
+            snprintf(buf, bufsize, "end");
+            break;
+
+        default:
+            snprintf(buf, bufsize, "unknown op %d", i->op);
+            break;
+    }
+}
+
+
+/* Print CFG in DOT format with full instructions */
+void print_cfg_dot(CFG *cfg, FILE *out) {
+    if (cfg == NULL) return;
+    
+    fprintf(out, "\n/* CFG for function %s */\n", cfg->func_name);
+    fprintf(out, "digraph CFG_%s {\n", cfg->func_name);
+    fprintf(out, "    node [shape=box, fontname=\"Courier\", fontsize=10];\n");
+    fprintf(out, "    edge [fontname=\"Courier\"];\n\n");
+    
+    /* Print nodes with full instruction listing */
+    for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+        fprintf(out, "    bb%d [label=\"", bb->id);
+        
+        /* Block header with ID */
+        fprintf(out, "BB%d", bb->id);
+        
+        /* Add labels if any */
+        if (bb->nlabels > 0) {
+            fprintf(out, " [");
+            for (int i = 0; i < bb->nlabels; i++) {
+                if (i > 0) fprintf(out, ", ");
+                fprintf(out, "%s", bb->labels[i]->name);
+            }
+            fprintf(out, "]");
+        }
+        
+        fprintf(out, "\n");
+        fprintf(out, "─────────────────\n");
+        
+        /* Print all instructions in the block */
+        TAC *t = bb->first;
+        int inst_count = 0;
+        while (t != NULL) {
+            char line[256];
+            
+            /* Format instruction into string */
+            format_tac_string(t, line, sizeof(line));
+            
+            /* Escape special characters for DOT format */
+            char *p = line;
+            while (*p) {
+                if (*p == '"') fprintf(out, "\\\"");
+                else if (*p == '\\') fprintf(out, "\\\\");
+                else if (*p == '\n') fprintf(out, "\n");
+                else fputc(*p, out);
+                p++;
+            }
+            
+            fprintf(out, "\n");
+            inst_count++;
+            
+            /* Stop at last instruction of block */
+            if (t == bb->last) break;
+            t = t->next;
+        }
+        
+        fprintf(out, "\"];\n");
+    }
+    
+    fprintf(out, "\n");
+    
+    /* Print edges */
+    for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+        for (ELIST *e = bb->succ; e != NULL; e = e->next) {
+            /* Label edge type */
+            const char *label = "";
+            if (bb->last && bb->last->op == TAC_IFZ) {
+                BB *jump_target = find_label_block(bb->last->a);
+                if (e->block == jump_target) {
+                    label = " [label=\"true\", color=\"red\"]";
+                } else {
+                    label = " [label=\"false\", color=\"blue\"]";
+                }
+            }
+            
+            fprintf(out, "    bb%d -> bb%d%s;\n", 
+                    bb->id, e->block->id, label);
+        }
+    }
+    
+    fprintf(out, "}\n");
+}
+
+
+/* Build and print CFG for all functions */
+void build_and_print_all_cfg(FILE *out) {
+    TAC *t = tac_first;
+    
+    fprintf(out, "\n/* ========== Control Flow Graphs ========== */\n");
+    
+    while (t != NULL) {
+        if (t->op == TAC_BEGINFUNC) {
+            /* Find matching ENDFUNC */
+            TAC *begin = t;
+            TAC *end = t->next;
+            
+            while (end != NULL && end->op != TAC_ENDFUNC) {
+                end = end->next;
+            }
+            
+            if (end == NULL) {
+                error("BEGINFUNC without matching ENDFUNC");
+                break;
+            }
+            
+            /* Build and print CFG */
+            CFG *cfg = build_cfg_for_func(begin, end);
+            if (cfg) {
+                print_cfg_dot(cfg, out);
+                free_cfg(cfg);
+            }
+            
+            t = end->next;
+        } else {
+            t = t->next;
+        }
+    }
+    
+    /* Reset BB ID counter for next compilation */
+    next_bb_id = 0;
+}
+
+/* Free CFG memory */
+void free_cfg(CFG *cfg) {
+    if (cfg == NULL) return;
+    
+    BB *bb = cfg->list;
+    while (bb != NULL) {
+        BB *next_bb = bb->next;
+        
+        /* Free edge lists */
+        ELIST *e = bb->succ;
+        while (e != NULL) {
+            ELIST *next_e = e->next;
+            free(e);
+            e = next_e;
+        }
+        
+        e = bb->pred;
+        while (e != NULL) {
+            ELIST *next_e = e->next;
+            free(e);
+            e = next_e;
+        }
+        
+        /* Free label array */
+        if (bb->labels) free(bb->labels);
+        
+        free(bb);
+        bb = next_bb;
+    }
+    
+    free(cfg);
+}

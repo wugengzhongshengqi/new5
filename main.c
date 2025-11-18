@@ -50,6 +50,7 @@ int main(int argc,   char *argv[])
 	tac_init();
 	yyparse();
 	tac_list();
+	build_and_print_all_cfg(file_x);
 	tac_obj();
 
 	fclose(file_s);

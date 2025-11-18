@@ -73,6 +73,35 @@ typedef struct exp
 	void *etc;
 } EXP;
 
+/* Edge list for successor/predecessor */
+typedef struct elist {
+    struct bb *block;
+    struct elist *next;
+} ELIST;
+
+/* Basic Block */
+typedef struct bb {
+    int id;                    /* Block ID */
+    TAC *first;                /* First instruction in block */
+    TAC *last;                 /* Last instruction in block */
+    
+    SYM **labels;              /* Labels at block head */
+    int nlabels;               /* Number of labels */
+    
+    ELIST *succ;               /* Successor blocks */
+    ELIST *pred;               /* Predecessor blocks */
+    
+    struct bb *next;           /* Next block in list */
+} BB;
+
+/* Control Flow Graph */
+typedef struct cfg {
+    char *func_name;           /* Function name */
+    BB *entry;                 /* Entry block */
+    BB *list;                  /* List of all blocks */
+    int nblocks;               /* Number of blocks */
+} CFG;
+
 /* global var */
 extern FILE *file_x, *file_s;
 extern int yylineno, scope, next_tmp, next_label;
@@ -110,3 +139,8 @@ EXP *do_cmp( int binop, EXP *exp1, EXP *exp2);
 EXP *do_un( int unop, EXP *exp);
 EXP *do_call_ret(char *name, EXP *arglist);
 void error(const char *format, ...);
+/* CFG functions*/
+CFG *build_cfg_for_func(TAC *begin_tac, TAC *end_tac);
+void print_cfg_dot(CFG *cfg, FILE *out);
+void build_and_print_all_cfg(FILE *out);
+void free_cfg(CFG *cfg);
