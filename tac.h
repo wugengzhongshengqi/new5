@@ -144,3 +144,16 @@ CFG *build_cfg_for_func(TAC *begin_tac, TAC *end_tac);
 void print_cfg_dot(CFG *cfg, FILE *out);
 void build_and_print_all_cfg(FILE *out);
 void free_cfg(CFG *cfg);
+/* Optimization functions */
+int local_constant_folding(BB *bb);
+int local_algebraic_simplification(BB *bb);
+int local_cse(BB *bb);
+void optimize_all_functions(void);
+
+/* Helper functions */
+int is_constant(SYM *s);
+int get_constant_value(SYM *s);
+int evaluate_binop(int op, int val1, int val2);
+SYM *find_or_create_const(int value);
+int tac_uses_symbol(TAC *t, SYM *s);
+void replace_symbol_in_tac(TAC *t, SYM *old_sym, SYM *new_sym);

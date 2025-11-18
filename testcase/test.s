@@ -25,54 +25,46 @@ main:
 
 	# var t0
 
-	# t0 = 2 + 3
-	LOD R5,2
-	LOD R6,3
-	ADD R5,R6
+	# t0 = 5
+	LOD R5,5
 
 	# x = t0
 	STO (R2+36),R5
 
 	# var t1
 
-	# t1 = x * 1
+	# t1 = x
 	STO (R2+8),R5
-	LOD R7,1
-	MUL R5,R7
 
 	# y = t1
 	STO (R2+40),R5
 
 	# var t2
 
-	# t2 = y + 0
+	# t2 = y
 	STO (R2+12),R5
-	LOD R8,0
-	ADD R5,R8
 
 	# z = t2
 	STO (R2+44),R5
 
 	# c = 10
-	LOD R9,10
+	LOD R6,10
 
 	# d = c
-	STO (R2+20),R9
+	STO (R2+20),R6
 
 	# var t3
 
-	# t3 = 5 / 1
-	LOD R10,5
-	DIV R10,R7
+	# t3 = 5
+	LOD R7,5
 
 	# a = t3
-	STO (R2+48),R10
+	STO (R2+48),R7
 
 	# var t4
 
-	# t4 = 0 * 100
-	LOD R11,100
-	MUL R8,R11
+	# t4 = 0
+	LOD R8,0
 
 	# b = t4
 	STO (R2+52),R8
@@ -83,13 +75,13 @@ main:
 	OTI
 
 	# output d
-	STO (R2+24),R9
-	LOD R15,R9
+	STO (R2+24),R6
+	LOD R15,R6
 	OTI
 
 	# output a
-	STO (R2+28),R10
-	LOD R15,R10
+	STO (R2+28),R7
+	LOD R15,R7
 	OTI
 
 	# output b

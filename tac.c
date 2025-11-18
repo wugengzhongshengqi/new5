@@ -854,7 +854,7 @@ static const char *get_op_name(int op) {
 }
 
 /* Format TAC instruction as string (similar to out_tac but returns string) */
-static void format_tac_string(TAC *i, char *buf, size_t bufsize) {
+void format_tac_string(TAC *i, char *buf, size_t bufsize) {
     char sa[12], sb[12], sc[12];
     
     switch(i->op) {
