@@ -1,0 +1,25 @@
+
+# tac list
+
+0x5b04333e9390	label main
+0x5b04333e93d0	begin
+0x5b04333e87d0	var a
+0x5b04333e8870	var b
+0x5b04333e8910	var c
+0x5b04333e89b0	var d
+0x5b04333e8a10	input a
+0x5b04333e8bd0	var t0
+0x5b04333e8c10	t0 = a + 10
+0x5b04333e8c50	b = t0
+0x5b04333e8e10	var t1
+0x5b04333e8e50	t1 = b - 20
+0x5b04333e8e90	c = t1
+0x5b04333e9050	var t2
+0x5b04333e9090	t2 = c * 30
+0x5b04333e90d0	d = t2
+0x5b04333e9130	output a
+0x5b04333e9190	output b
+0x5b04333e91f0	output c
+0x5b04333e9250	output d
+0x5b04333e92f0	output L1
+0x5b04333e9410	end

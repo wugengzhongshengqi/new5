@@ -1,0 +1,28 @@
+# Compiled binaries
+asm
+machine
+mini
+
+# Generated files from flex/bison
+*.l.c
+*.y.c
+*.y.h
+
+# Object files
+*.o
+
+# Executables
+*.out
+*.exe
+
+# IDE and system files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+build/
+dist/
