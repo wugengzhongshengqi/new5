@@ -427,7 +427,14 @@ void asm_code(TAC *c)
 			r=reg_alloc(c->a);
 			out_str(file_s, "	LOD R15,R%u\n", r);
 			out_str(file_s, "	OTI\n");
-		} else if(c->a->type == SYM_TEXT)
+		} 
+		else if(c->a->type == SYM_INT) 
+		{
+			/* 直接输出优化得到的常量 */
+			out_str(file_s, "	LOD R15,%d\n", c->a->value);
+			out_str(file_s, "	OTI\n");
+		}
+		else if(c->a->type == SYM_TEXT)
 		{
 			r=reg_alloc(c->a);
 			out_str(file_s, "	LOD R15,R%u\n", r);

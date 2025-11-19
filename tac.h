@@ -79,19 +79,33 @@ typedef struct elist {
     struct elist *next;
 } ELIST;
 
-/* Basic Block */
+struct bitset;
+/* Control Flow Graph information for Data Flow Analysis */
 typedef struct bb {
-    int id;                    /* Block ID */
-    TAC *first;                /* First instruction in block */
-    TAC *last;                 /* Last instruction in block */
+    int id;
+    TAC *first;
+    TAC *last;
     
-    SYM **labels;              /* Labels at block head */
-    int nlabels;               /* Number of labels */
+    SYM **labels;
+    int nlabels;
     
-    ELIST *succ;               /* Successor blocks */
-    ELIST *pred;               /* Predecessor blocks */
-    
-    struct bb *next;           /* Next block in list */
+    ELIST *succ;
+    ELIST *pred;
+    struct bb *next;
+    /* === 新增：数据流分析集合 === */
+    /* Liveness Analysis (BitSets) */
+    struct bitset *live_gen;  /* 使用前未定义 (USE) */
+    struct bitset *live_kill; /* 定义 (DEF) */
+    struct bitset *live_in;   /* 入口活跃 */
+    struct bitset *live_out;  /* 出口活跃 */
+    /* Propagation Analysis (State Arrays) */
+    struct var_state *in_state;  /* 入口变量状态 */
+    struct var_state *out_state; /* 出口变量状态 */
+	/* === 新增：可用表达式分析 (Available Expressions) === */
+    struct bitset *ae_gen;  /* 块内生成且未被杀死的表达式 */
+    struct bitset *ae_kill; /* 块内重新定义了操作数的表达式 */
+    struct bitset *ae_in;   /* 入口可用表达式 */
+    struct bitset *ae_out;  /* 出口可用表达式 */
 } BB;
 
 /* Control Flow Graph */
@@ -157,3 +171,5 @@ int evaluate_binop(int op, int val1, int val2);
 SYM *find_or_create_const(int value);
 int tac_uses_symbol(TAC *t, SYM *s);
 void replace_symbol_in_tac(TAC *t, SYM *old_sym, SYM *new_sym);
+
+void global_optimization(CFG *cfg);

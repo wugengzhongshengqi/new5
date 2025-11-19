@@ -653,7 +653,7 @@ static int next_bb_id = 0;
 
 /* Create a new basic block */
 static BB *new_bb(void) {
-    BB *bb = (BB *)malloc(sizeof(BB));
+    BB *bb = (BB *)calloc(1, sizeof(BB)); 
     bb->id = next_bb_id++;
     bb->first = NULL;
     bb->last = NULL;
@@ -735,6 +735,8 @@ CFG *build_cfg_for_func(TAC *begin_tac, TAC *end_tac) {
         error("Invalid function boundaries");
         return NULL;
     }
+
+	next_bb_id = 0;  
     
     CFG *cfg = (CFG *)malloc(sizeof(CFG));
     cfg->func_name = "unknown";
