@@ -3,17 +3,17 @@
 
 # tac list
 
-0x5e0745b12da0	label main
-0x5e0745b12de0	begin
-0x5e0745b127d0	var a
-0x5e0745b12c60	ifz 1 goto L1
-0x5e0745b12990	a = 10
-0x5e0745b12ca0	goto L2
-0x5e0745b12b60	label L1
-0x5e0745b12aa0	a = 20
-0x5e0745b12c20	label L2
-0x5e0745b12d00	output a
-0x5e0745b12e20	end
+0x59c680dfdda0	label main
+0x59c680dfdde0	begin
+0x59c680dfd7d0	var a
+0x59c680dfdc60	ifz 1 goto L1
+0x59c680dfd990	a = 10
+0x59c680dfdca0	goto L2
+0x59c680dfdb60	label L1
+0x59c680dfdaa0	a = 20
+0x59c680dfdc20	label L2
+0x59c680dfdd00	output a
+0x59c680dfde20	end
 
 /* ========== Global Optimizations ========== */
 
@@ -24,14 +24,14 @@
 
 # tac list
 
-0x5e0745b12da0	label main
-0x5e0745b12de0	begin
-0x5e0745b127d0	var a
-0x5e0745b12990	a = 10
-0x5e0745b12ca0	goto L2
-0x5e0745b12c20	label L2
-0x5e0745b12d00	output a
-0x5e0745b12e20	end
+0x59c680dfdda0	label main
+0x59c680dfdde0	begin
+0x59c680dfd7d0	var a
+0x59c680dfd990	a = 10
+0x59c680dfdca0	goto L2
+0x59c680dfdc20	label L2
+0x59c680dfdd00	output a
+0x59c680dfde20	end
 
 /* ========== Control Flow Graphs ========== */
 

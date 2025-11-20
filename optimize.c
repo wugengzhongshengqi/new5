@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include "tac.h"
 
 /* Check if symbol is a constant */
@@ -1460,6 +1461,324 @@ static int global_cse(CFG *cfg) {
     return changed;
 }
 
+/* ========================================================== */
+/*           Phase 5: Loop Analysis & Optimization            */
+/* ========================================================== */
+
+/* --- 循环结构定义 --- */
+typedef struct loop {
+    int id;
+    int header_id;        /* 循环头的 Block ID */
+    BB *header;           /* 循环头指针 */
+    BitSet *body;         /* 循环体包含的所有 Block ID */
+    BitSet *invariants;   /* 判定为循环不变式的变量 ID */
+    BitSet *definitions;  /* 循环内定义的所有变量 ID */
+    struct loop *next;
+} Loop;
+
+static void free_loops(Loop *loops) {
+    while (loops) {
+        Loop *next = loops->next;
+        bs_free(loops->body);
+        bs_free(loops->invariants);
+        bs_free(loops->definitions);
+        free(loops);
+        loops = next;
+    }
+}
+
+/* 计算支配节点 (同前，无变化) */
+static void compute_dominators(CFG *cfg, BitSet **dom_sets) {
+    int n = cfg->nblocks + 1;
+    for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+        dom_sets[bb->id] = bs_new(n);
+        if (bb == cfg->entry) {
+            bs_set(dom_sets[bb->id], bb->id);
+        } else {
+            for (int j = 0; j < dom_sets[bb->id]->n_words; j++) dom_sets[bb->id]->bits[j] = 0xFFFFFFFF;
+        }
+    }
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+            if (bb == cfg->entry) continue;
+            BitSet *temp = bs_new(n);
+            for (int j = 0; j < temp->n_words; j++) temp->bits[j] = 0xFFFFFFFF;
+            int has_pred = 0;
+            for (ELIST *p = bb->pred; p != NULL; p = p->next) {
+                for (int j = 0; j < temp->n_words; j++) temp->bits[j] &= dom_sets[p->block->id]->bits[j];
+                has_pred = 1;
+            }
+            if (has_pred) {
+                bs_set(temp, bb->id);
+                int distinct = 0;
+                for (int j = 0; j < temp->n_words; j++) {
+                    if (temp->bits[j] != dom_sets[bb->id]->bits[j]) { distinct = 1; break; }
+                }
+                if (distinct) { bs_copy(dom_sets[bb->id], temp); changed = 1; }
+            }
+            bs_free(temp);
+        }
+    }
+}
+
+/* 循环识别 (同前，无变化) */
+static Loop *find_loops(CFG *cfg) {
+    int max_id = 0;
+    for(BB *b=cfg->list; b; b=b->next) if(b->id > max_id) max_id = b->id;
+    BitSet **doms = (BitSet **)calloc(max_id + 1, sizeof(BitSet*));
+    compute_dominators(cfg, doms);
+    Loop *loop_list = NULL;
+    for (BB *n = cfg->list; n != NULL; n = n->next) {
+        for (ELIST *s = n->succ; s != NULL; s = s->next) {
+            BB *h = s->block;
+            if (bs_test(doms[n->id], h->id)) {
+                Loop *l = (Loop *)malloc(sizeof(Loop));
+                l->id = loop_list ? loop_list->id + 1 : 1;
+                l->header = h;
+                l->header_id = h->id;
+                l->body = bs_new(max_id + 1);
+                l->invariants = bs_new(var_count);
+                l->definitions = bs_new(var_count);
+                l->next = loop_list;
+                loop_list = l;
+                bs_set(l->body, h->id);
+                bs_set(l->body, n->id);
+                BB **stack = (BB **)malloc(sizeof(BB*) * (cfg->nblocks + 1));
+                int top = 0;
+                if (n != h) stack[top++] = n;
+                while (top > 0) {
+                    BB *curr = stack[--top];
+                    for (ELIST *p = curr->pred; p != NULL; p = p->next) {
+                        BB *pred = p->block;
+                        if (!bs_test(l->body, pred->id)) {
+                            bs_set(l->body, pred->id);
+                            stack[top++] = pred;
+                        }
+                    }
+                }
+                free(stack);
+            }
+        }
+    }
+    for(int i=0; i<=max_id; i++) if(doms[i]) bs_free(doms[i]);
+    free(doms);
+    return loop_list;
+}
+
+/* --- 3. 循环不变式外提 (LICM Helpers) --- */
+
+static int is_operand_invariant(SYM *s, Loop *l) {
+    if (s == NULL) return 1;
+    if (s->type == SYM_INT || s->type == SYM_LABEL || s->type == SYM_FUNC || s->type == SYM_TEXT) return 1;
+    if (s->type == SYM_VAR) {
+        int id = get_var_id(s);
+        if (id < 0) return 1;
+        if (bs_test(l->definitions, id)) {
+            return bs_test(l->invariants, id);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static BB *find_preheader_insert_point(Loop *l) {
+    BB *pre = NULL;
+    int count = 0;
+    for (ELIST *p = l->header->pred; p != NULL; p = p->next) {
+        if (!bs_test(l->body, p->block->id)) {
+            pre = p->block;
+            count++;
+        }
+    }
+    if (count == 1) return pre;
+    return NULL;
+}
+
+static void move_instruction_after(TAC *t, BB *target, BB *source, TAC *at) {
+    if (t == NULL || target == NULL || source == NULL) return;
+    if (t == at) return;
+
+    /* Unlink from Source */
+    if (t->prev) t->prev->next = t->next;
+    else source->first = t->next;
+    if (t->next) t->next->prev = t->prev;
+    else source->last = t->prev;
+    
+    /* Link to Target */
+    if (at == NULL) {
+        t->next = target->first;
+        t->prev = NULL;
+        if (target->first) target->first->prev = t;
+        target->first = t;
+        if (target->last == NULL) target->last = t;
+    } else {
+        t->next = at->next;
+        t->prev = at;
+        if (at->next) at->next->prev = t;
+        else target->last = t;
+        at->next = t;
+    }
+}
+
+static int optimize_licm(CFG *cfg) {
+    if (var_count == 0) return 0;
+    
+    Loop *loops = find_loops(cfg);
+    if (!loops) return 0;
+    
+    int changed = 0;
+    int *def_counts = (int *)calloc(var_count, sizeof(int));
+
+    for (Loop *l = loops; l != NULL; l = l->next) {
+        BB *preheader = find_preheader_insert_point(l);
+        if (preheader == NULL) continue; 
+        
+        bs_clear(l->definitions);
+        bs_clear(l->invariants);
+        memset(def_counts, 0, var_count * sizeof(int));
+
+        /* Step A: 收集定义 (修复：增加 t == bb->last 终止条件) */
+        for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+            if (bs_test(l->body, bb->id)) {
+                TAC *t = bb->first;
+                while (t != NULL) {
+                    SYM *def = NULL;
+                    /* 明确的定义收集逻辑，排除 TAC_VAR */
+                    if ((t->op >= TAC_ADD && t->op <= TAC_GE) || 
+                        t->op == TAC_NEG || t->op == TAC_COPY || 
+                        t->op == TAC_INPUT || t->op == TAC_CALL) {
+                            if (t->a && t->a->type == SYM_VAR) def = t->a;
+                    }
+                    
+                    if (def) {
+                         int id = get_var_id(def);
+                         if (id >= 0) {
+                             bs_set(l->definitions, id);
+                             def_counts[id]++;
+                         }
+                    }
+                    
+                    /* 关键修复：防止越过 Basic Block 边界 */
+                    if (t == bb->last) break;
+                    t = t->next;
+                }
+            }
+        }
+
+        /* Step B: 识别不变式 (修复：增加 t == bb->last 终止条件) */
+        int loop_iter_changed = 1;
+        while (loop_iter_changed) {
+            loop_iter_changed = 0;
+            
+            for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+                if (bs_test(l->body, bb->id)) {
+                    TAC *t = bb->first;
+                    while (t != NULL) {
+                        int is_candidate = ((t->op >= TAC_ADD && t->op <= TAC_GE) || (t->op == TAC_COPY));
+                        
+                        if (is_candidate && t->a && t->a->type == SYM_VAR) {
+                             int def_id = get_var_id(t->a);
+                             if (def_id >= 0 && !bs_test(l->invariants, def_id)) {
+                                 /* 现在 def_counts 准确了，如果不变量满足条件 */
+                                 if (def_counts[def_id] == 1) {
+                                     if (is_operand_invariant(t->b, l) && is_operand_invariant(t->c, l)) {
+                                         bs_set(l->invariants, def_id);
+                                         loop_iter_changed = 1;
+                                     }
+                                 }
+                             }
+                        }
+                        
+                        if (t == bb->last) break;
+                        t = t->next;
+                    }
+                }
+            }
+        }
+        
+        /* Step C: 代码外提 (修复：增加 t == bb->last 并处理指令移动后的迭代) */
+        TAC *insert_pos = preheader->last;
+        while (insert_pos != NULL && 
+              (insert_pos->op == TAC_GOTO || insert_pos->op == TAC_IFZ || insert_pos->op == TAC_RETURN)) {
+            insert_pos = insert_pos->prev;
+        }
+
+        for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+            if (bs_test(l->body, bb->id)) {
+                TAC *t = bb->first;
+                while (t != NULL) {
+                    TAC *next_t = t->next;
+                    int is_last_node = (t == bb->last); /* 保存标记，作为终止条件 */
+                    
+                    int is_candidate = ((t->op >= TAC_ADD && t->op <= TAC_GE) || (t->op == TAC_COPY));
+                    if (is_candidate && t->a && t->a->type == SYM_VAR) {
+                         int id = get_var_id(t->a);
+                         if (id >= 0 && bs_test(l->invariants, id)) {
+                             /* 移动指令 */
+                             move_instruction_after(t, preheader, bb, insert_pos);
+                             insert_pos = t; 
+                             changed = 1;
+                         }
+                    }
+                    
+                    if (is_last_node) break;
+                    t = next_t;
+                }
+            }
+        }
+    }
+    
+    free(def_counts);
+    free_loops(loops);
+    return changed;
+}
+
+
+/* ========================================================== */
+/*         Phase Final: Fix Variable Layout                   */
+/* ========================================================== */
+
+/* 将所有的 TAC_VAR 移动到函数开头，防止 LICM 导致的声明滞后问题 */
+static void fix_variable_declarations(TAC *begin, TAC *end) {
+    if (begin == NULL || end == NULL) return;
+
+    /* 插入点初始定位在 BEGINFUNC 之后 */
+    TAC *insert_pos = begin; 
+    
+    TAC *curr = begin->next;
+    while (curr != NULL && curr != end) { /* 遍历到 end 之前 */
+        TAC *next_node = curr->next;
+        
+        if (curr->op == TAC_VAR) {
+            /* 如果已经在头部连续位置，只需更新插入点向后移 */
+            if (curr == insert_pos->next) {
+                insert_pos = curr;
+            } else {
+                /* 否则，执行剪切并插入操作 */
+                
+                /* 1. 从原来的位置解绑 */
+                if (curr->prev) curr->prev->next = curr->next;
+                if (curr->next) curr->next->prev = curr->prev;
+                
+                /* 2. 插入到 insert_pos 之后 */
+                curr->prev = insert_pos;
+                curr->next = insert_pos->next;
+                
+                if (insert_pos->next) insert_pos->next->prev = curr;
+                insert_pos->next = curr;
+                
+                /* 3. 更新插入点，保证下一个 VAR 排在后面 */
+                insert_pos = curr;
+            }
+        }
+        
+        /* 如果在移动过程中 curr 变成了 last 指针，需要小心处理 */
+        /* 但这里只要保证 next_node 取值得当即可 */
+        curr = next_node;
+    }
+}
 
 
 /* ========================================================== */
@@ -1549,6 +1868,12 @@ void optimize_all_functions(void) {
                     
                     /* 全局公共子表达式消除 (Analysis + Rewrite) */
                     changed |= global_cse(cfg);
+
+                    if (optimize_licm(cfg)) {
+                        changed = 1;
+                        /* LICM 改变了控制流图中的指令位置，可能需要重新计算活跃性 */
+                        /* 但 CFG 拓扑结构未变，不需 free_cfg */
+                    }
                     
                     /* 全局死代码消除 (Liveness Analysis + Remove) */
                     changed |= global_dce(cfg);
@@ -1561,6 +1886,9 @@ void optimize_all_functions(void) {
                 free_cfg(cfg); 
                 /* free(var_map); // 如果 var_map 是全局分配的 */
             }
+            
+            fix_variable_declarations(begin, end);
+
             t = end->next;
         } else {
             t = t->next;

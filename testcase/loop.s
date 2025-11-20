@@ -25,6 +25,38 @@ main:
 
 	# var k
 
+	# var t0
+
+	# var t1
+
+	# var t2
+
+	# var t3
+
+	# var t4
+
+	# var t5
+
+	# var t6
+
+	# var t7
+
+	# var t8
+
+	# var t9
+
+	# var t10
+
+	# var t11
+
+	# var t12
+
+	# var t13
+
+	# var t14
+
+	# var t15
+
 	# input a
 	LOD R5,(R2+8)
 	ITI
@@ -43,14 +75,70 @@ main:
 	# j = 5
 	LOD R8,5
 
-	# label L4
-	STO (R2+8),R5
+	# t2 = b * c
 	STO (R2+12),R6
 	STO (R2+16),R7
-	STO (R2+32),R8
-L4:
+	MUL R6,R7
 
-	# var t0
+	# t3 = a + t2
+	STO (R2+8),R5
+	STO (R2+48),R6
+	ADD R5,R6
+
+	# t4 = a + c
+	LOD R9,(R2+8)
+	ADD R9,R7
+
+	# t5 = t4 / b
+	STO (R2+56),R9
+	LOD R10,(R2+12)
+	DIV R9,R10
+
+	# t6 = t3 - t5
+	STO (R2+52),R5
+	STO (R2+60),R9
+	SUB R5,R9
+
+	# t7 = 9 + t6
+	LOD R11,9
+	STO (R2+64),R5
+	ADD R11,R5
+
+	# d = t7
+	STO (R2+68),R11
+
+	# t8 = t2
+
+	# t9 = t3
+	LOD R12,(R2+52)
+
+	# t10 = c - a
+	LOD R13,(R2+8)
+	SUB R7,R13
+
+	# t11 = t10 / b
+	STO (R2+80),R7
+	DIV R7,R10
+
+	# t12 = t9 - t11
+	STO (R2+76),R12
+	STO (R2+84),R7
+	SUB R12,R7
+
+	# t13 = 9 + t12
+	LOD R14,9
+	STO (R2+88),R12
+	ADD R14,R12
+
+	# e = t13
+	STO (R2+92),R14
+
+	# label L4
+	STO (R2+72),R6
+	STO (R2+32),R8
+	STO (R2+20),R11
+	STO (R2+24),R14
+L4:
 
 	# t0 = (j > 0)
 	LOD R5,(R2+32)
@@ -81,8 +169,6 @@ L4:
 	STO (R2+28),R8
 L1:
 
-	# var t1
-
 	# t1 = (i > 0)
 	LOD R5,(R2+28)
 	LOD R6,0
@@ -105,109 +191,19 @@ L1:
 	LOD R15,R7
 	OTI
 
-	# var t2
-
-	# t2 = b * c
-	LOD R8,(R2+12)
-	LOD R9,(R2+16)
-	MUL R8,R9
-
-	# var t3
-
-	# t3 = a + t2
-	LOD R10,(R2+8)
-	STO (R2+48),R8
-	ADD R10,R8
-
-	# var t4
-
-	# t4 = a + c
-	LOD R11,(R2+8)
-	ADD R11,R9
-
-	# var t5
-
-	# t5 = t4 / b
-	STO (R2+56),R11
-	LOD R12,(R2+12)
-	DIV R11,R12
-
-	# var t6
-
-	# t6 = t3 - t5
-	STO (R2+52),R10
-	STO (R2+60),R11
-	SUB R10,R11
-
-	# var t7
-
-	# t7 = 9 + t6
-	LOD R13,9
-	STO (R2+64),R10
-	ADD R13,R10
-
-	# d = t7
-	STO (R2+68),R13
-
-	# var t8
-
-	# t8 = t2
-
-	# var t9
-
-	# t9 = a + t8
-	LOD R14,(R2+8)
-	STO (R2+72),R8
-	ADD R14,R8
-
-	# var t10
-
-	# t10 = c - a
-	LOD R15,(R2+8)
-	SUB R9,R15
-
-	# var t11
-
-	# t11 = t10 / b
-	STO (R2+80),R9
-	DIV R9,R12
-
-	# var t12
-
-	# t12 = t9 - t11
-	STO (R2+76),R14
-	STO (R2+84),R9
-	SUB R14,R9
-
-	# var t13
-
-	# t13 = 9 + t12
-	LOD R5,9
-	STO (R2+88),R14
-	ADD R5,R14
-
-	# e = t13
-	STO (R2+92),R5
-
-	# var t14
-
 	# t14 = i - 1
-	LOD R6,1
-	SUB R7,R6
+	LOD R8,1
+	SUB R7,R8
 
 	# i = t14
 	STO (R2+96),R7
 
 	# goto L1
-	STO (R2+24),R5
 	STO (R2+28),R7
-	STO (R2+20),R13
 	JMP L1
 
 	# label L2
 L2:
-
-	# var t15
 
 	# t15 = j - 1
 	LOD R5,(R2+32)
