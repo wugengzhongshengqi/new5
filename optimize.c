@@ -1747,6 +1747,351 @@ static int optimize_licm(CFG *cfg) {
     return changed;
 }
 
+/* ========================================================== */
+/*       Phase 6 Helpers: Induction Variable Analysis         */
+/* ========================================================== */
+
+/* 获取循环归纳变量的步长 (Step) */
+static int get_loop_iv_step(Loop *l, CFG *cfg, int var_id, int *out_step) {
+    if (!bs_test(l->definitions, var_id)) return 0;
+    
+    TAC *def_tac = NULL;
+    int def_count = 0;
+    BB *def_bb = NULL;
+    
+    /* 扫描循环体，寻找对该变量的唯一变量更新 */
+    for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+        if (bs_test(l->body, bb->id)) {
+            TAC *t = bb->first;
+            while (t != NULL) {
+                if (t->a && t->a->type == SYM_VAR && get_var_id(t->a) == var_id) {
+                    /* 忽略自赋值 i=i */
+                    if (t->op == TAC_COPY && t->a == t->b) { } 
+                    else {
+                        def_tac = t; def_bb = bb; def_count++;
+                    }
+                }
+                if (t == bb->last) break;
+                t = t->next;
+            }
+        }
+    }
+    
+    /* 必须只有唯一的定义点 */
+    if (def_count != 1 || def_tac == NULL) return 0;
+    
+    /* 检查更新逻辑是否为简单的 ADD/SUB */
+    TAC *target_op = def_tac;
+    
+    /* 处理 i = t1 形式，回溯找到 t1 = i + 1 */
+    if (def_tac->op == TAC_COPY && def_tac->b->type == SYM_VAR) {
+        SYM *temp_var = def_tac->b;
+        TAC *trace = def_tac->prev;
+        int found_temp = 0;
+        while (trace != NULL) {
+            if (trace->a == temp_var) {
+                if (trace->op == TAC_COPY && trace->a == trace->b) { } 
+                else { target_op = trace; found_temp = 1; break; }
+            }
+            if (trace == def_bb->first) break;
+            trace = trace->prev;
+        }
+        if (!found_temp) return 0;
+    }
+    
+    /* 提取步长 */
+    if (target_op->op == TAC_ADD) {
+        if (target_op->b->type == SYM_VAR && get_var_id(target_op->b) == var_id && is_constant(target_op->c)) {
+            *out_step = get_constant_value(target_op->c); return 1;
+        }
+        if (target_op->c->type == SYM_VAR && get_var_id(target_op->c) == var_id && is_constant(target_op->b)) {
+            *out_step = get_constant_value(target_op->b); return 1;
+        }
+    } else if (target_op->op == TAC_SUB) {
+        if (target_op->b->type == SYM_VAR && get_var_id(target_op->b) == var_id && is_constant(target_op->c)) {
+            *out_step = -get_constant_value(target_op->c); return 1;
+        }
+    }
+    return 0;
+}
+
+/* 获取归纳变量在循环前的初始值 (Init) */
+static int get_iv_init_value(BB *preheader, int var_id, int *out_init) {
+    if (!preheader) return 0;
+    
+    /* 倒序扫描前置首部块 (Preheader)，寻找最后一次对 IV 的赋值 */
+    TAC *t = preheader->last;
+    while (t != NULL) {
+        /* 跳过控制流指令 */
+        if (t->op != TAC_GOTO && t->op != TAC_IFZ && t->op != TAC_LABEL) {
+            if (t->a && t->a->type == SYM_VAR && get_var_id(t->a) == var_id) {
+                /* 必须是常数赋值，如 i = 0 */
+                if (t->op == TAC_COPY && is_constant(t->b)) {
+                    *out_init = get_constant_value(t->b);
+                    return 1;
+                }
+                return 0; /* 如果是 i = n (变量)，目前暂不支持 */
+            }
+        }
+        t = t->prev;
+    }
+    return 0;
+}
+
+
+/* 获取循环比较条件中的边界常数 */
+static int get_loop_limit(Loop *l, CFG *cfg, int var_id, int *out_limit, int *out_op) {
+    /* 遍历循环体寻找比较指令 */
+    for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+        if (bs_test(l->body, bb->id)) {
+            TAC *t = bb->first;
+            while (t != NULL) {
+                /* 查找比较指令 */
+                if (t->op >= TAC_EQ && t->op <= TAC_GE) {
+                    /* 情况 1: i > 0 (VAR op CONST) */
+                    if (t->b && t->b->type == SYM_VAR && get_var_id(t->b) == var_id && is_constant(t->c)) {
+                        *out_limit = get_constant_value(t->c);
+                        *out_op = t->op;
+                        return 1;
+                    }
+                    /* 情况 2: 0 < i (CONST op VAR) -> 需要翻转操作符 */
+                    else if (t->c && t->c->type == SYM_VAR && get_var_id(t->c) == var_id && is_constant(t->b)) {
+                        *out_limit = get_constant_value(t->b);
+                        switch(t->op) {
+                            case TAC_EQ: *out_op = TAC_EQ; break;
+                            case TAC_NE: *out_op = TAC_NE; break;
+                            case TAC_LT: *out_op = TAC_GT; break; /* < 变 > */
+                            case TAC_LE: *out_op = TAC_GE; break; /* <= 变 >= */
+                            case TAC_GT: *out_op = TAC_LT; break; /* > 变 < */
+                            case TAC_GE: *out_op = TAC_LE; break; /* >= 变 <= */
+                        }
+                        return 1; /* 找到后立即返回 */
+                    }
+                }
+                if (t == bb->last) break;
+                t = t->next;
+            }
+        }
+    }
+    return 0;
+}
+
+
+/* 复制单个 TAC 节点 */
+static TAC *copy_tac_node(TAC *src) {
+    if (!src) return NULL;
+    TAC *new_t = (TAC *)malloc(sizeof(TAC));
+    *new_t = *src; // 浅拷贝内容
+    new_t->next = NULL;
+    new_t->prev = NULL;
+    new_t->etc = NULL; // 清除 CFG 信息
+    return new_t;
+}
+
+/* 检查并执行循环展开 */
+static int optimize_loop_unrolling(CFG *cfg) {
+    if (var_count == 0) return 0;
+    Loop *loops = find_loops(cfg);
+    if (!loops) return 0;
+    
+    int changed = 0;
+    
+    for (Loop *l = loops; l != NULL; l = l->next) {
+        /* 1. 简单的基本结构检查：不仅要单入口，最好还是简单的结构 */
+        /* 这里的 Unroll 策略依赖于 TAC 链表的线性结构提取，只处理简单循环 */
+        
+        /* 找到 Preheader 即循环入口 */
+        BB *preheader = find_preheader_insert_point(l);
+        if (!preheader) continue;
+
+        /* 2. 识别归纳变量 (IV)、步长 (Step)、初始值 (Init) 和 边界 (Limit) */
+        /* 遍历所有变量尝试找到 IV */
+        int iv_id = -1;
+        int step = 0;
+        int init = 0;
+        int limit = 0;
+        int cmp_op = 0;
+        
+        /* 重用 IVSR 中的定义扫描逻辑（简单化） */
+        bs_clear(l->definitions);
+        for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+            if (bs_test(l->body, bb->id)) {
+                TAC *t = bb->first;
+                while (t != NULL) {
+                    if (t->a && t->a->type == SYM_VAR && get_var_id(t->a) >= 0)
+                         bs_set(l->definitions, get_var_id(t->a));
+                    if (t == bb->last) break;
+                    t = t->next;
+                }
+            }
+        }
+
+        int found_candidate = 0;
+        for (int i = 0; i < var_count; i++) {
+            if (get_loop_iv_step(l, cfg, i, &step)) { // 借用 IVSR 的函数
+                if (get_iv_init_value(preheader, i, &init)) { // 借用 IVSR 的函数
+                    if (get_loop_limit(l, cfg, i, &limit, &cmp_op)) {
+                        iv_id = i;
+                        found_candidate = 1;
+                        break; 
+                    }
+                }
+            }
+        }
+        
+        if (!found_candidate) continue;
+
+        /* 3. 计算迭代次数 (Trip Count) */
+        /* 支持递增 (step > 0) 和 递减 (step < 0) */
+        if (step == 0) continue; /* 防止死循环分析 */
+        
+        long long iterations = 0;
+        
+        if (step > 0) {
+            /* --- 递增循环 (e.g., i++) --- */
+            /* 期望条件: i < N (LT) 或 i <= N (LE) */
+            switch (cmp_op) {
+                case TAC_LT: // i < limit
+                    if (init >= limit) iterations = 0;
+                    else iterations = (limit - init + step - 1) / step; 
+                    break;
+                case TAC_LE: // i <= limit
+                    if (init > limit) iterations = 0;
+                    else iterations = (limit - init) / step + 1;
+                    break;
+                default: 
+                    /* 如果步长是正的，但条件是 > 或 >=，通常意味着无限循环或立即退出，直接跳过优化 */
+                    continue;
+            }
+        } else { // step < 0
+            /* --- 递减循环 (e.g., i--) --- */
+            /* 期望条件: i > N (GT) 或 i >= N (GE) */
+            long long abs_step = -((long long)step); // 取步长绝对值
+            
+            switch (cmp_op) {
+                case TAC_GT: // i > limit
+                    if (init <= limit) iterations = 0;
+                    else iterations = (init - limit + abs_step - 1) / abs_step;
+                    break;
+                case TAC_GE: // i >= limit
+                    if (init < limit) iterations = 0;
+                    else iterations = (init - limit) / abs_step + 1;
+                    break;
+                default:
+                    /* 如果步长是负的，但条件是 < 或 <=，跳过 */
+                    continue;
+            }
+        }
+        
+        /* 4. 阈值检查：只展开固定且次数较小的循环 */
+        /* 防止代码膨胀爆炸 */
+        if (iterations <= 1 || iterations > 32) continue; 
+
+        /* 5. 提取循环体的 TAC 范围 */
+        /* 假设循环形如： Label_Head -> ... -> Body -> ... -> Goto Label_Head */
+        /* 我们需要找到 Label_Head 和回边的 Goto */
+        
+        TAC *loop_header_label_tac = l->header->first;
+        if (loop_header_label_tac->op != TAC_LABEL) continue;
+        
+        TAC *back_edge_tac = NULL;
+        
+        /* 寻找指向 header 的回边 */
+        for (BB *bb = cfg->list; bb != NULL; bb = bb->next) {
+            if (bs_test(l->body, bb->id)) {
+                if (bb->last && bb->last->op == TAC_GOTO && bb->last->a == loop_header_label_tac->a) {
+                    back_edge_tac = bb->last;
+                    break;
+                }
+            }
+        }
+        
+        if (!back_edge_tac) continue;
+
+        /* 计算循环体包含的指令数，再次进行阈值检查 */
+        int body_size = 0;
+        TAC *scan = loop_header_label_tac->next;
+        while (scan != back_edge_tac && scan != NULL) {
+            body_size++;
+            scan = scan->next;
+        }
+        if (body_size * iterations > 200) continue; /* 总展开后指令太多则放弃 */
+
+        /* 6. 执行展开 (Code Cloning) */
+        /* 策略：
+           1. 克隆 (Header->next 到 BackEdge->prev) 之间的代码 N 次。
+           2. 将克隆的代码串接起来，替换掉原循环。
+           3. 移除跳转指令 (Goto) 和 标签 (Label)，除了最开始的入口。
+           4. 依靠 Constant Propagation 清理掉展开后多余的 ifz 检查。
+        */
+        
+        TAC *unrolled_head = NULL;
+        TAC *unrolled_tail = NULL;
+        
+        for (int k = 0; k < iterations; k++) {
+            TAC *src = loop_header_label_tac->next; // 跳过 Label L_Head
+            while (src != back_edge_tac) { // 不包含最后的 Goto L_Head
+                
+                /* 过滤内部 Label：如果是完全展开，内部的 Label 会导致重复定义错误。
+                   如果循环内部有跳转，简单展开是不安全的。
+                   这里做一个简单的检查：如果 Loop Body 内部有 Label，则放弃优化 */
+                if (src->op == TAC_LABEL) {
+                     // 清理已分配的并退出
+                     while(unrolled_head) { TAC *n=unrolled_head->next; free(unrolled_head); unrolled_head=n;}
+                     goto ABORT_UNROLL; // 虽然 C 没有 goto 跨函数，这里用 break 配合 flag
+                }
+                
+                TAC *copy = copy_tac_node(src);
+                
+                if (unrolled_head == NULL) {
+                    unrolled_head = unrolled_tail = copy;
+                } else {
+                    unrolled_tail->next = copy;
+                    copy->prev = unrolled_tail;
+                    unrolled_tail = copy;
+                }
+                
+                src = src->next;
+            }
+        }
+        
+        /* 7. 替换原循环 */
+        /* 原循环：Label ... Goto */
+        /* 新结构：Label -> Unrolled_Seq -> Fallthrough to Exit_BB */
+        
+        /* 连接到 Label 之后 */
+        loop_header_label_tac->next = unrolled_head;
+        if (unrolled_head) unrolled_head->prev = loop_header_label_tac;
+        
+        /* 连接到 Goto 之后 (即 Loop Exit) */
+        TAC *exit_target = back_edge_tac->next;
+        
+        if (unrolled_tail) {
+            unrolled_tail->next = exit_target;
+            if (exit_target) exit_target->prev = unrolled_tail;
+        } else {
+            /* 空循环体? */
+            loop_header_label_tac->next = exit_target;
+            if (exit_target) exit_target->prev = loop_header_label_tac;
+        }
+
+        /* 确保 back_edge_tac 与之后的链断开，防止混乱 */
+        /* 虽然我们修改了 loop_header_label_tac->next，但旧的 body 链表还在内存里，
+           只要 CFG 重建时不再引用即可。 */
+
+        changed = 1;
+        /* 展开了一个循环后，CFG 结构大变，建议立即返回并重建 CFG */
+        /* break loop iteration */
+        break; 
+        
+        ABORT_UNROLL: continue;
+    }
+    
+    free_loops(loops);
+    return changed;
+}
+
+
 
 /* ========================================================== */
 /*         Phase Final: Fix Variable Layout                   */
@@ -1819,6 +2164,14 @@ void optimize_all_functions(void) {
                 
                 /* 初始变量映射构建 */
                 init_global_analysis(cfg);
+
+                if (optimize_loop_unrolling(cfg)) {
+                     /* 如果发生了展开，必须彻底重构 CFG，因为指令链表变了 */
+                     free_cfg(cfg);
+                     cfg = build_cfg_for_func(begin, end);
+                     init_global_analysis(cfg); // 重新初始化变量计数
+                     fprintf(file_x, "/* Loop Unrolled */\n");
+                }
 
                 int iteration = 0;
                 int changed;
