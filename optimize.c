@@ -228,6 +228,18 @@ int local_algebraic_simplification(BB *bb) {
                     t->c = NULL;
                     simplified = 1;
                 }
+                /* x = a * 2 => x = a + a */
+                else if (is_constant(t->c) && get_constant_value(t->c) == 2) {
+                    t->op = TAC_ADD;    // 将乘法改为加法
+                    t->c = t->b;        // 将第二个操作数设为和第一个一样 (a + a)
+                    simplified = 1;
+                }
+                /* x = 2 * a => x = a + a */
+                else if (is_constant(t->b) && get_constant_value(t->b) == 2) {
+                    t->op = TAC_ADD;    // 将乘法改为加法
+                    t->b = t->c;        // 将第一个操作数设为和第二个一样 (a + a)
+                    simplified = 1;
+                }
                 break;
                 
             case TAC_DIV:

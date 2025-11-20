@@ -75,15 +75,14 @@ L2:
 	TST R5
 	JEZ L3
 
-	# t2 = i * 2
+	# t2 = i + i
 	LOD R7,(R2+8)
-	LOD R8,2
-	MUL R7,R8
+	ADD R7,R7
 
 	# t3 = t2 + 9
 	STO (R2+28),R7
-	LOD R9,9
-	ADD R7,R9
+	LOD R8,9
+	ADD R7,R8
 
 	# j = t3
 	STO (R2+32),R7
@@ -94,20 +93,20 @@ L2:
 	OTI
 
 	# output L1
-	LOD R10,L1
-	LOD R15,R10
+	LOD R9,L1
+	LOD R15,R9
 	OTS
 
 	# t4 = i + 1
-	LOD R11,(R2+8)
-	LOD R12,1
-	ADD R11,R12
+	LOD R10,(R2+8)
+	LOD R11,1
+	ADD R10,R11
 
 	# i = t4
-	STO (R2+36),R11
+	STO (R2+36),R10
 
 	# goto L2
-	STO (R2+8),R11
+	STO (R2+8),R10
 	JMP L2
 
 	# label L3

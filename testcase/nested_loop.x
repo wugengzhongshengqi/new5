@@ -3,82 +3,82 @@
 
 # tac list
 
-0x5aac2a12cbc0	label main
-0x5aac2a12cc00	begin
-0x5aac2a12b7d0	var i
-0x5aac2a12b870	var j
-0x5aac2a12b910	var k
-0x5aac2a12ba20	k = 0
-0x5aac2a12c9e0	label L4
-0x5aac2a12bbc0	var t0
-0x5aac2a12bc00	t0 = (k < 10)
-0x5aac2a12cb20	ifz t0 goto L5
-0x5aac2a12bcb0	i = 0
-0x5aac2a12c600	label L2
-0x5aac2a12bdf0	var t1
-0x5aac2a12be30	t1 = (i < 10)
-0x5aac2a12c740	ifz t1 goto L3
-0x5aac2a12bff0	var t2
-0x5aac2a12c030	t2 = 2 * i
-0x5aac2a12c180	var t3
-0x5aac2a12c1c0	t3 = t2 + 9
-0x5aac2a12c200	j = t3
-0x5aac2a12c260	output j
-0x5aac2a12c300	output L1
-0x5aac2a12c4c0	var t4
-0x5aac2a12c500	t4 = i + 1
-0x5aac2a12c540	i = t4
-0x5aac2a12c640	goto L2
-0x5aac2a12c700	label L3
-0x5aac2a12c8a0	var t5
-0x5aac2a12c8e0	t5 = k + 1
-0x5aac2a12c920	k = t5
-0x5aac2a12ca20	goto L4
-0x5aac2a12cae0	label L5
-0x5aac2a12cc40	end
+0x55b4398edbc0	label main
+0x55b4398edc00	begin
+0x55b4398ec7d0	var i
+0x55b4398ec870	var j
+0x55b4398ec910	var k
+0x55b4398eca20	k = 0
+0x55b4398ed9e0	label L4
+0x55b4398ecbc0	var t0
+0x55b4398ecc00	t0 = (k < 10)
+0x55b4398edb20	ifz t0 goto L5
+0x55b4398eccb0	i = 0
+0x55b4398ed600	label L2
+0x55b4398ecdf0	var t1
+0x55b4398ece30	t1 = (i < 10)
+0x55b4398ed740	ifz t1 goto L3
+0x55b4398ecff0	var t2
+0x55b4398ed030	t2 = 2 * i
+0x55b4398ed180	var t3
+0x55b4398ed1c0	t3 = t2 + 9
+0x55b4398ed200	j = t3
+0x55b4398ed260	output j
+0x55b4398ed300	output L1
+0x55b4398ed4c0	var t4
+0x55b4398ed500	t4 = i + 1
+0x55b4398ed540	i = t4
+0x55b4398ed640	goto L2
+0x55b4398ed700	label L3
+0x55b4398ed8a0	var t5
+0x55b4398ed8e0	t5 = k + 1
+0x55b4398ed920	k = t5
+0x55b4398eda20	goto L4
+0x55b4398edae0	label L5
+0x55b4398edc40	end
 
 /* ========== Global Optimizations ========== */
 
 /* Optimizing function main */
-/* Result: 1 iterations */
+/* Result: 2 iterations */
 
 # Optimized TAC
 
 # tac list
 
-0x5aac2a12cbc0	label main
-0x5aac2a12cc00	begin
-0x5aac2a12b7d0	var i
-0x5aac2a12b870	var j
-0x5aac2a12b910	var k
-0x5aac2a12bbc0	var t0
-0x5aac2a12bdf0	var t1
-0x5aac2a12bff0	var t2
-0x5aac2a12c180	var t3
-0x5aac2a12c4c0	var t4
-0x5aac2a12c8a0	var t5
-0x5aac2a12ba20	k = 0
-0x5aac2a12c9e0	label L4
-0x5aac2a12bc00	t0 = (k < 10)
-0x5aac2a12cb20	ifz t0 goto L5
-0x5aac2a12bcb0	i = 0
-0x5aac2a12c600	label L2
-0x5aac2a12be30	t1 = (i < 10)
-0x5aac2a12c740	ifz t1 goto L3
-0x5aac2a12c030	t2 = i * 2
-0x5aac2a12c1c0	t3 = t2 + 9
-0x5aac2a12c200	j = t3
-0x5aac2a12c260	output j
-0x5aac2a12c300	output L1
-0x5aac2a12c500	t4 = i + 1
-0x5aac2a12c540	i = t4
-0x5aac2a12c640	goto L2
-0x5aac2a12c700	label L3
-0x5aac2a12c8e0	t5 = k + 1
-0x5aac2a12c920	k = t5
-0x5aac2a12ca20	goto L4
-0x5aac2a12cae0	label L5
-0x5aac2a12cc40	end
+0x55b4398edbc0	label main
+0x55b4398edc00	begin
+0x55b4398ec7d0	var i
+0x55b4398ec870	var j
+0x55b4398ec910	var k
+0x55b4398ecbc0	var t0
+0x55b4398ecdf0	var t1
+0x55b4398ecff0	var t2
+0x55b4398ed180	var t3
+0x55b4398ed4c0	var t4
+0x55b4398ed8a0	var t5
+0x55b4398eca20	k = 0
+0x55b4398ed9e0	label L4
+0x55b4398ecc00	t0 = (k < 10)
+0x55b4398edb20	ifz t0 goto L5
+0x55b4398eccb0	i = 0
+0x55b4398ed600	label L2
+0x55b4398ece30	t1 = (i < 10)
+0x55b4398ed740	ifz t1 goto L3
+0x55b4398ed030	t2 = i + i
+0x55b4398ed1c0	t3 = t2 + 9
+0x55b4398ed200	j = t3
+0x55b4398ed260	output j
+0x55b4398ed300	output L1
+0x55b4398ed500	t4 = i + 1
+0x55b4398ed540	i = t4
+0x55b4398ed640	goto L2
+0x55b4398ed700	label L3
+0x55b4398ed8e0	t5 = k + 1
+0x55b4398ed920	k = t5
+0x55b4398eda20	goto L4
+0x55b4398edae0	label L5
+0x55b4398edc40	end
 
 /* ========== Control Flow Graphs ========== */
 
@@ -118,7 +118,7 @@ ifz t1 goto L3
 "];
     bb4 [label="BB4
 ─────────────────
-t2 = i * 2
+t2 = i + i
 t3 = t2 + 9
 j = t3
 output j
